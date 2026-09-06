@@ -140,18 +140,22 @@ function report(host, seconds) {
 }
 
 // --- one entry point every trigger funnels into ---------------------------
+// Events only close/open segments (settle). Reporting happens on the alarm
+// tick, so the report cadence stays ~30s regardless of how chatty a page is.
 let queue = Promise.resolve(); // serialise; storage.session has no locking
-function pump(label) {
+function schedule(label, doFlush) {
   queue = queue
     .then(async () => {
       const state = await loadState();
       await settle(state);
-      await flush(state);
+      if (doFlush) await flush(state);
       await saveState(state);
     })
     .catch((err) => console.error(`[webguard] ${label} failed`, err));
   return queue;
 }
+
+const pump = (label) => schedule(label, false);
 
 // --- wiring --------------------------------------------------------------
 chrome.tabs.onActivated.addListener(() => pump("tabs.onActivated"));
@@ -161,7 +165,7 @@ chrome.tabs.onUpdated.addListener((_id, changeInfo) => {
 chrome.windows.onFocusChanged.addListener(() => pump("windows.onFocusChanged"));
 chrome.idle.onStateChanged.addListener(() => pump("idle.onStateChanged"));
 chrome.alarms.onAlarm.addListener((a) => {
-  if (a.name === ALARM_NAME) pump("alarm");
+  if (a.name === ALARM_NAME) schedule("alarm", true);
 });
 
 chrome.runtime.onStartup.addListener(init);
