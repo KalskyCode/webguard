@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "WebGuard",
+  "version": "0.1.0",
+  "description": "Measures time on chosen sites and blocks them past a daily limit.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabs", "idle", "alarms", "storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
