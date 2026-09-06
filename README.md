@@ -78,7 +78,10 @@ with a single click.
 - [x] **Step 1 — core**: day boundary (`core/clock.py`), URL → eTLD+1
   normalization (`core/domains.py`), SQLite storage with the 24h-delay logic
   (`core/storage.py`). Tests pass.
-- [ ] Step 2 — extension + time measurement
+- [x] **Step 2 — extension**: MV3 service worker (`extension/`) measures
+  active-tab time per host with a segment model (settle on tab/window/idle
+  events, ~30s alarm backstop, state in `storage.session`). Reports to the
+  console for now.
 - [ ] Step 3 — enforcement (`hosts` + `declarativeNetRequest`)
 - [ ] Step 4 — daemon as a Windows service (WinSW, ACL, watchdog)
 - [ ] Step 5 — GUI (Tauri + React)
