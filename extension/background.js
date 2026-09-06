@@ -1,41 +1,13 @@
-// WebGuard - browser extension (MV3 service worker)
-// Step 2: measure active-tab time and report it. For now it only logs to the
-// console; POST /usage to the daemon lands in a later step.
-//
-// The model
-// ---------
-// Time is measured in "segments". A segment is a stretch of wall-clock time
-// during which exactly one host was being looked at and the time counted:
-//
-//     countable  <=>  a browser window is focused
-//                 AND  the user is not idle/locked
-//                 AND  the active tab is a real http(s) page
-//
-// Any event that could change that predicate calls settle(): it closes the
-// running segment, credits its milliseconds to `pending[host]`, and opens a new
-// segment if we are still counting. A periodic alarm does the same, so a page
-// left open with no events still gets credited and flushed.
-//
-// Why an alarm and not setInterval: an MV3 service worker is killed after ~30s
-// idle, which would stop setInterval. chrome.alarms survives suspension and
-// wakes the worker. Chrome clamps the alarm period to 30s minimum, so that is
-// our worst-case reporting lag - CLAUDE.md's "~5s" is not reachable this way.
-//
-// Why chrome.storage.session for state: in-memory globals do not survive worker
-// suspension. storage.session is memory-backed (never hits disk), cleared when
-// the browser closes, and shared across worker restarts - exactly what we need.
+// WebGuard - MV3 service worker. Measures time on the active tab per host.
+// report() only logs for now; POST /usage to the daemon comes in step 4.
 
 const ALARM_NAME = "webguard-tick";
-const IDLE_SECONDS = 20; // chrome.idle threshold (min honoured value is 15)
+const IDLE_SECONDS = 20;
 const ALARM_SECONDS = 30; // Chrome clamps the alarm period to this floor anyway
-const FLUSH_MIN_MS = 1000; // do not report sub-second dust
+const FLUSH_MIN_MS = 1000;
 
-// --- state in storage.session --------------------------------------------------
-// {
-//   seg: { host: string, startedAt: number } | null,   // startedAt = Date.now() ms
-//   pending: { [host: string]: number }                 // unflushed milliseconds
-// }
-
+// storage.session (memory-backed, survives worker suspension):
+// { seg: { host, startedAt } | null, pending: { [host]: ms } }
 async function loadState() {
   const { wg } = await chrome.storage.session.get("wg");
   return wg ?? { seg: null, pending: {} };
@@ -45,11 +17,8 @@ async function saveState(state) {
   await chrome.storage.session.set({ wg: state });
 }
 
-// --- turning a tab URL into a measurable host -------------------------------
-// Plain hostname like "www.youtube.com"; normalisation to eTLD+1 is the
-// daemon's job (core/domains.py), not ours. null for anything we must not
-// measure: chrome://, chrome-extension://, file://, about:blank, the new-tab
-// page, empty/undefined.
+// Plain hostname; normalisation to eTLD+1 is the daemon's job (core/domains.py).
+// null for anything we must not measure (chrome://, file://, about:blank, ...).
 function hostFromUrl(url) {
   if (!url) return null;
   let u;
@@ -62,11 +31,8 @@ function hostFromUrl(url) {
   return u.hostname || null;
 }
 
-// isCountable(view): given { windowFocused, idleState, host, audible } return
-// true iff a segment should be running. idleState is "active" | "idle" |
-// "locked". Per decision: a still-audible tab (video/music playing) counts even
-// while chrome.idle reports "idle", because chrome.idle only watches the
-// keyboard and mouse. "locked" always pauses.
+// A still-audible tab counts even while chrome.idle reports "idle" - idle only
+// watches keyboard/mouse, not a playing video. "locked" always pauses.
 function isCountable(view) {
   if (!view.windowFocused) return false;
   if (!view.host) return false;
@@ -75,9 +41,6 @@ function isCountable(view) {
   return true;
 }
 
-// --- reading the current world ----------------------------------------------
-// One place that asks Chrome "what is on screen right now", so every event
-// handler and the alarm go through the same path.
 async function currentView() {
   const [win, idleState] = await Promise.all([
     chrome.windows.getLastFocused({ populate: false }).catch(() => null),
@@ -97,7 +60,7 @@ async function currentView() {
   return { windowFocused, idleState, host, audible };
 }
 
-// --- the core: close the open segment, open the next one --------------------
+// Close the running segment, credit its time, open the next one.
 async function settle(state, now = Date.now()) {
   const prevHost = state.seg ? state.seg.host : null;
 
@@ -124,25 +87,23 @@ async function flush(state) {
   for (const [host, ms] of Object.entries(state.pending)) {
     if (ms < FLUSH_MIN_MS) continue;
     const seconds = Math.floor(ms / 1000);
-    state.pending[host] = ms - seconds * 1000; // carry the remainder
+    state.pending[host] = ms - seconds * 1000; // carry the sub-second remainder
     report(host, seconds);
   }
   for (const [host, ms] of Object.entries(state.pending)) {
-    if (ms === 0) delete state.pending[host]; // do not let the object grow forever
+    if (ms === 0) delete state.pending[host];
   }
 }
 
 function report(host, seconds) {
-  // Step 4 replaces this with: POST http://127.0.0.1:<port>/usage
-  // body { host, delta_seconds: seconds }. The daemon owns the clock and the
-  // eTLD+1 normalisation; we only say "this host got N more seconds".
+  // Step 4: POST http://127.0.0.1:<port>/usage { host, delta_seconds: seconds }
   console.log(`[webguard] ${host} +${seconds}s`);
 }
 
-// --- one entry point every trigger funnels into ---------------------------
-// Events only close/open segments (settle). Reporting happens on the alarm
-// tick, so the report cadence stays ~30s regardless of how chatty a page is.
-let queue = Promise.resolve(); // serialise; storage.session has no locking
+// Events only settle segments; reporting happens on the alarm tick so the
+// cadence stays ~30s however chatty the page is. Serialised - storage.session
+// has no locking. An alarm (not setInterval) because the worker can be evicted.
+let queue = Promise.resolve();
 function schedule(label, doFlush) {
   queue = queue
     .then(async () => {
@@ -157,7 +118,6 @@ function schedule(label, doFlush) {
 
 const pump = (label) => schedule(label, false);
 
-// --- wiring --------------------------------------------------------------
 chrome.tabs.onActivated.addListener(() => pump("tabs.onActivated"));
 chrome.tabs.onUpdated.addListener((_id, changeInfo) => {
   if (changeInfo.url || changeInfo.status === "complete") pump("tabs.onUpdated");
@@ -177,8 +137,8 @@ async function init() {
   await pump("init");
 }
 
-// A cold start can also be triggered by one of the event listeners above firing
-// after the worker was evicted; make sure the alarm exists in that case too.
+// The worker may be revived by an event above rather than by init; make sure
+// the alarm still exists in that case.
 chrome.alarms.get(ALARM_NAME).then((a) => {
   if (!a) init();
 });
