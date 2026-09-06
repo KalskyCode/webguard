@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["tests"],
+
+  // Pyrefly jest checkerem typów w tym projekcie (pyrefly.toml).
+  // Pylance zostaje do nawigacji/autouzupełniania, ale bez własnej analizy typów,
+  // żeby nie dublować diagnostyki.
+  "python.analysis.typeCheckingMode": "off"
+}

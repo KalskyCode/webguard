@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# WebGuard runtime state
+*.db
+*.db-journal
+*.db-wal
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# OS
+Thumbs.db
+desktop.ini

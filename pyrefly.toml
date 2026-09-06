@@ -1,0 +1,13 @@
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
+project-excludes = [
+    "**/.venv/**",
+    "**/node_modules/**",
+    "**/__pycache__/**",
+]
+
+# Pyrefly nie wykrywa .venv sam. Klucz `python-interpreter` zweryfikowany
+# na pyrefly 1.2.0 (bogus klucz daje "Extra keys found in config").
+python-interpreter = ".venv/Scripts/python.exe"
